@@ -1,0 +1,49 @@
+name: Bump Version
+
+# Manually triggered: pick a bump level, it commits the new version to
+# src/constants.py and pushes a matching vX.Y.Z tag. That tag push is what
+# Build Release (build-release.yml) listens for, so this is the one step
+# that starts a release — no manual version editing required.
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: 'Version part to bump (0-versioning: no major)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bump version
+        id: bump
+        run: |
+          python build.py --bump ${{ github.event.inputs.level }}
+          v=$(python build.py --version | cut -d' ' -f2)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "Bump version to ${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "v${{ steps.bump.outputs.version }}"

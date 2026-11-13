@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 import sys
 
-__version__: str = '2.0.1'
+__version__: str = '0.3.0'
 
 # ---------------------------------------------------------------------------
 # Cross-platform settings paths  (migrated from os.path → pathlib)

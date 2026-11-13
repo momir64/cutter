@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-Build script for ArpCut.
-Run: python build.py           # build for current platform
-     python build.py --version  # print version and exit
+Build script for cutter.
+Run: python build.py                 # build for current platform
+     python build.py --version       # print version and exit
+     python build.py --bump          # bump patch version (0.3.0 -> 0.3.1)
+     python build.py --bump minor    # bump minor version (0.3.0 -> 0.4.0)
+
+0-versioning: major always stays 0, so there's no --bump major.
 """
 
 import subprocess
@@ -12,13 +16,45 @@ from pathlib import Path
 from typing import NoReturn
 
 # Read version from the canonical source
+CONSTANTS_PATH: Path = Path(__file__).parent / 'src' / 'constants.py'
+
+
 def _read_version() -> str:
     """Parse __version__ from constants.py without importing it."""
-    constants_path = Path(__file__).parent / 'src' / 'constants.py'
-    for line in constants_path.read_text().splitlines():
+    for line in CONSTANTS_PATH.read_text().splitlines():
         if line.startswith('__version__'):
             return line.split('=', 1)[1].strip().strip("'\"")
     return '0.0.0'
+
+
+def bump_version(level: str = 'patch') -> str:
+    """Bump __version__ in constants.py (0.minor.patch — 0-versioning, major never
+    moves), write it back, and return the new version string. Does not commit or
+    tag — see --bump."""
+    current = _read_version()
+    try:
+        major, minor, patch = (int(p) for p in current.split('.'))
+    except ValueError:
+        print(f"Can't parse current version {current!r} as major.minor.patch")
+        sys.exit(1)
+    if level == 'minor':
+        minor, patch = minor + 1, 0
+    elif level == 'patch':
+        patch += 1
+    else:
+        print(f"Unknown bump level {level!r} (use patch or minor)")
+        sys.exit(1)
+    new_version = f'{major}.{minor}.{patch}'
+
+    text = CONSTANTS_PATH.read_text()
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith('__version__'):
+            lines[i] = f"__version__: str = '{new_version}'\n"
+            break
+    CONSTANTS_PATH.write_text(''.join(lines))
+    return new_version
+
 
 VERSION: str = _read_version()
 
@@ -166,8 +202,17 @@ def package_dmg() -> None:
 
 
 if __name__ == '__main__':
-    if '--version' in sys.argv:
-        print(f'ArpCut {VERSION}')
+    if '--bump' in sys.argv:
+        i = sys.argv.index('--bump')
+        level = sys.argv[i + 1] if i + 1 < len(sys.argv) and sys.argv[i + 1] in \
+            ('patch', 'minor') else 'patch'
+        new_version = bump_version(level)
+        print(f'Bumped version: {VERSION} -> {new_version}')
+        print(f"Commit it, then tag and push to release:\n"
+              f"  git commit -am 'Bump version to {new_version}'\n"
+              f"  git tag v{new_version} && git push origin v{new_version}")
+    elif '--version' in sys.argv:
+        print(f'cutter {VERSION}')
     elif '--dmg' in sys.argv:
         package_dmg()
     else:

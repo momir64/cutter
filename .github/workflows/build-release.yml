@@ -67,7 +67,7 @@ jobs:
 
       # Best-effort: bundle the Npcap driver so the installer can offer it. If the
       # download fails, the installer still builds (the app points users at the
-      # Npcap page on first run) — see the ISPP guard in arpcut.iss.
+      # Npcap page on first run) — see the ISPP guard in cutter.iss.
       - name: Download Npcap for bundling
         shell: pwsh
         continue-on-error: true
@@ -82,16 +82,16 @@ jobs:
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             /DMyAppVersion=${{ steps.ver.outputs.version }} `
-            packaging\windows\arpcut.iss
+            packaging\windows\cutter.iss
 
       # Ship both options: the standalone launcher and the friendly installer.
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ArpCut-Windows
+          name: cutter-Windows
           path: |
-            dist/ArpCut-${{ steps.ver.outputs.version }}.exe
-            dist/ArpCut-${{ steps.ver.outputs.version }}-Setup.exe
+            dist/cutter.exe
+            dist/cutter-setup.exe
 
   build-macos:
     needs: test

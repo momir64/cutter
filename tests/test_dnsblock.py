@@ -100,12 +100,25 @@ def test_should_not_drop_on_garbage_payload():
 # -- SNI (TLS ClientHello) domain blocking -----------------------------------
 
 def _client_hello(host: str) -> bytes:
-    from scapy.layers.tls.record import TLS
-    from scapy.layers.tls.handshake import TLSClientHello
-    from scapy.layers.tls.extensions import TLS_Ext_ServerName, ServerName
-    ch = TLS(msg=[TLSClientHello(ext=[TLS_Ext_ServerName(
-        servernames=[ServerName(servername=host.encode())])])])
-    return bytes(ch)
+    """A minimal, spec-shaped TLS ClientHello carrying a server_name (SNI)
+    extension, built by hand rather than via scapy's TLS layer: constructing
+    almost any scapy TLS handshake object triggers its session/key-derivation
+    code as a side effect, which NameErrors on a NameError: name 'HMAC' is not
+    defined when the optional `cryptography` package isn't installed — scapy's
+    own bug, unrelated to what this is testing (parse_tls_sni does its own
+    manual byte parsing and never touches scapy's TLS layer or crypto)."""
+    hostb = host.encode()
+    sni_name = bytes([0]) + len(hostb).to_bytes(2, 'big') + hostb       # name_type + len + name
+    sni_list = len(sni_name).to_bytes(2, 'big') + sni_name              # server_name_list
+    sni_ext = (0).to_bytes(2, 'big') + len(sni_list).to_bytes(2, 'big') + sni_list
+    ext_block = len(sni_ext).to_bytes(2, 'big') + sni_ext
+    body = (b'\x03\x03' + b'\x00' * 32                                  # client_version + random
+            + b'\x00'                                                   # session_id (empty)
+            + (2).to_bytes(2, 'big') + b'\x13\x01'                      # cipher_suites (one)
+            + b'\x01\x00'                                               # compression (null)
+            + ext_block)
+    handshake = bytes([0x01]) + len(body).to_bytes(3, 'big') + body     # type=ClientHello + len
+    return bytes([0x16]) + b'\x03\x01' + len(handshake).to_bytes(2, 'big') + handshake
 
 
 def test_parse_tls_sni_extracts_host():
