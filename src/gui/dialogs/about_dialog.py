@@ -20,7 +20,7 @@ class AboutDialog(Dialog):
         logo.setAlignment(Qt.AlignCenter)
         self.content.addWidget(logo)
 
-        for text, role in (('ArpCut', 'hero'),
+        for text, role in (('cutter', 'hero'),
                            (f'Version {__version__}', 'muted'),
                            ('A modern, hardened network-control tool for macOS, '
                             'Windows and Linux.', 'caption'),

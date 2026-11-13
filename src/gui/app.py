@@ -18,8 +18,8 @@ def main() -> int:
     repair_settings()
 
     app = QApplication(sys.argv)
-    app.setApplicationName('ArpCut')
-    app.setApplicationDisplayName('ArpCut')
+    app.setApplicationName('cutter')
+    app.setApplicationDisplayName('cutter')
     app.setWindowIcon(icons.app_icon())
     app.setQuitOnLastWindowClosed(False)  # tray keeps us alive
 

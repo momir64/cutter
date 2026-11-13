@@ -33,7 +33,7 @@ class PrivilegeDialog(Dialog):
         htext.setSpacing(3)
         htext.addWidget(label('Administrator access', 'hero'))
         htext.addWidget(self.caption(
-            'ArpCut works at the raw-network level to discover and cut devices. '
+            'cutter works at the raw-network level to discover and cut devices. '
             'Every operating system requires administrator access for that — the '
             'same as Wireshark or Little Snitch. Grant it once, below.'))
         head.addLayout(htext, 1)
@@ -68,7 +68,7 @@ class PrivilegeDialog(Dialog):
         hb.addWidget(hline())
         hb.addWidget(label('Keep it set up (recommended)', 'section'))
         hb.addWidget(self.caption(
-            'Install a small background helper that holds the privilege, so ArpCut '
+            'Install a small background helper that holds the privilege, so cutter '
             'just works on every launch — no prompt each time.'))
         self._helper_btn = IconButton('shield-check', 'Install Background Helper',
                                       variant='toolbar')
@@ -88,11 +88,11 @@ class PrivilegeDialog(Dialog):
         self._status_icon.setPixmap(icons.pixmap('check' if ok else 'alert',
                                                  THEME.good if ok else THEME.warn, 18))
         if st['root']:
-            self._status_text.setText('ArpCut is running with administrator access. You\'re all set.')
+            self._status_text.setText('cutter is running with administrator access. You\'re all set.')
         elif st['helper_running']:
             self._status_text.setText('The background helper is installed and running. You\'re all set.')
         elif st['helper_installed']:
-            self._status_text.setText('Helper installed but not responding yet — relaunch ArpCut.')
+            self._status_text.setText('Helper installed but not responding yet — relaunch cutter.')
         else:
             self._status_text.setText('Running as a standard user — scanning and cutting are limited.')
 
@@ -104,7 +104,7 @@ class PrivilegeDialog(Dialog):
         elif plat == 'linux':
             self._grant_hint.setText('You\'ll be asked for your password (PolicyKit).')
         else:
-            self._grant_hint.setText('You\'ll see the macOS password prompt, then ArpCut reopens with access.')
+            self._grant_hint.setText('You\'ll see the macOS password prompt, then cutter reopens with access.')
         self._grant_hint.setVisible(not ok)
         # helper option only where a daemon applies
         self._helper_box.setVisible(plat in ('macos', 'linux') and not st['helper_running'])
@@ -120,8 +120,8 @@ class PrivilegeDialog(Dialog):
         ok, _msg = self.ctrl.install_helper()
         self.refresh()
         if ok and QMessageBox.question(
-                self, 'ArpCut',
-                'Background helper installed.\n\nRestart ArpCut with administrator '
+                self, 'cutter',
+                'Background helper installed.\n\nRestart cutter with administrator '
                 'access now to start using it?') == QMessageBox.Yes:
             self._restart_with_access()
 
