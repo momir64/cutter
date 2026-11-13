@@ -158,13 +158,13 @@ def build() -> None:
         print()
         print("Build complete!")
         if system == 'Windows':
-            print(f"Output: dist/cutter/cutter.exe")
+            print("Output: dist/cutter.exe")
             _build_installer()
         elif system == 'Darwin':
-            print(f"Output: dist/ArpCut-{VERSION}.app")
+            print("Output: dist/cutter.app")
             print("Installer: python build.py --dmg   (or packaging/macos/create_dmg.sh)")
         else:
-            print(f"Output: dist/ArpCut-{VERSION}")
+            print("Output: dist/cutter")
     else:
         print("Build failed!")
         sys.exit(1)
@@ -210,9 +210,9 @@ def package_dmg() -> None:
     if platform.system() != 'Darwin':
         print("--dmg is macOS-only.")
         return
-    app = Path('dist') / f'ArpCut-{VERSION}.app'
+    app = Path('dist') / 'cutter.app'
     script = Path(__file__).parent / 'packaging' / 'macos' / 'create_dmg.sh'
-    print(f"Packaging {app} → dmg ...")
+    print(f"Packaging {app} to dmg...")
     result = subprocess.run(['bash', str(script), str(app)])
     if result.returncode != 0:
         print("DMG packaging failed!")

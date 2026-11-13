@@ -119,13 +119,13 @@ jobs:
 
       - name: Create ZIP
         run: |
-          cd dist && zip -r "ArpCut-macOS.zip" "ArpCut-${{ steps.ver.outputs.version }}.app"
+          cd dist && zip -r "cutter-${{ steps.ver.outputs.version }}-macOS.zip" "cutter.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArpCut-macOS
-          path: dist/ArpCut-macOS.zip
+          name: cutter-macOS
+          path: dist/cutter-${{ steps.ver.outputs.version }}-macOS.zip
 
   build-linux:
     needs: test
@@ -159,8 +159,8 @@ jobs:
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArpCut-Linux
-          path: dist/ArpCut-${{ steps.ver.outputs.version }}
+          name: cutter-Linux
+          path: dist/cutter
 
   release:
     needs: [build-windows, build-macos, build-linux]
