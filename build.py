@@ -87,9 +87,23 @@ COLLECT_ALL: list[str] = [
     # add QtQuick, QtWebEngine, Qt Designer and other unused modules (~100 MB extra).
 ]
 
+# --collect-all scapy pulls in every scapy submodule, including ones cutter never
+# touches at runtime (it only does ARP/ICMP scanning, kill, and raw TLS-ClientHello
+# byte sniffing for SNI blocking — see networking/dnsblock.py). These two are build-
+# time no-ops that otherwise print harmless but noisy warnings: krack needs the
+# optional `cryptography` package cutter doesn't depend on, and scapy's own CBOR
+# registration fails for unrelated reasons. tkinter is excluded too — PySide6 is the
+# only GUI toolkit this app uses.
+EXCLUDE_MODULES: list[str] = [
+    'scapy.modules.krack',
+    'scapy.cbor',
+    'scapy.cborpacket',
+    'tkinter',
+]
+
 
 def build() -> None:
-    """Build ArpCut binary for the current platform."""
+    """Build the cutter binary for the current platform."""
     system: str = platform.system()
 
     # Base command — invoke PyInstaller via the current interpreter so it works
@@ -126,6 +140,10 @@ def build() -> None:
     # Collect all data for these packages
     for pkg in collect_all:
         cmd.extend(['--collect-all', pkg])
+
+    # Unused submodules --collect-all scapy would otherwise pull in and warn about
+    for mod in EXCLUDE_MODULES:
+        cmd.extend(['--exclude-module', mod])
 
     # Entry point
     cmd.append('src/elmocut.py')
