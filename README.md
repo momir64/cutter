@@ -1,20 +1,22 @@
-# ArpCut
+# cutter
 
 A modern, hardened network-control tool for **macOS, Windows, and Linux**. Discover
 the devices on your local network and cut, throttle, redirect, or watch their
 traffic — from a clean, device-centric interface.
 
-Forked from and inspired by [elmoCut](https://github.com/elmoiv/elmocut) by Khaled
-El-Morshedy (elmoiv); rebuilt around a PySide6 frosted-glass UI, a privilege-separated
-engine, and kernel-level enforcement.
+**cutter** is my fork of [ArpCut](https://github.com/Mvgnu/ArpCut) by Mvgnus (Magnus
+Ohle), which itself forked [elmoCut](https://github.com/elmoiv/elmocut) by Khaled
+El-Morshedy (elmoiv). I rebuilt it Windows-focused: native frameless window chrome with
+real Aero Snap, a multi-select device list with undo/redo, an async-started engine, and
+a round of UI/UX fixes not present upstream.
 
-**Author:** Mvgnus (Magnus Ohle) · GPL-3.0
+GPL-3.0
 
 > ⚠️ For education and **authorized** network administration only. Use it only on
 > networks you own or have explicit permission to test.
 
 <p align="center">
-  <img src="assets/screenshots/main-dark.png" alt="ArpCut main window" width="840">
+  <img src="assets/screenshots/main-dark.png" alt="cutter main window" width="840">
 </p>
 
 *(addresses in the screenshots are redacted)*
@@ -26,15 +28,20 @@ engine, and kernel-level enforcement.
 **Discover** — ARP scan (fast) or a thorough ping sweep. Devices show as cards with
 vendor, IP/MAC, nickname, and live state.
 
-**Per-device actions** (select a device, act from the card or the action bar):
+**Per-device actions** (click a card to select it — Shift/Ctrl-click for a multi-device
+selection — then right-click for the action menu):
 
 | Action | What it does |
 |--------|--------------|
 | **Cut / Restore** | Takes the device off the internet for real — ARP redirect **+** firewall drop, so it's a true cut even while kernel forwarding is on. |
 | **One-way** | Blocks only the device's *outbound* traffic. |
-| **Lag switch** | Intermittent lag — configurable on/off intervals and direction. |
+| **Lag switch** | Intermittent lag — configurable on/off intervals and direction. With several devices selected, each gets the same interval length but a staggered start, so they don't all lag in lockstep. |
 | **Traffic monitor** | Routes the device through this machine and shows its live flows (push-updated, not polled). It stays online while you watch. |
 | **Cut All / Restore All** | The same, network-wide. |
+
+Multi-select applies Cut, One-way, and Lag to every selected device at once; Blocker,
+Traffic monitor, and device details stay single-device actions. Ctrl+Z / Ctrl+Shift+Z /
+Ctrl+Y undo and redo the selection itself.
 
 **Blocker** (per device + network-wide):
 
@@ -53,19 +60,20 @@ vendor, IP/MAC, nickname, and live state.
   <img src="assets/screenshots/traffic.png" alt="Traffic monitor" width="420">
 </p>
 
-**Quality-of-life** — light/dark frosted-glass theme, menu-bar tray, device nicknames,
-remember-cut-devices, and a persistent status line.
+**Quality-of-life** — light/dark theme, menu-bar tray, device nicknames,
+remember-cut-devices, a persistent status line, and (Windows) native Aero Snap /
+maximize with a proper rounded-corner, DWM-shadowed frameless window.
 
 ---
 
 ## Privileges — and "Set Up Access"
 
 Raw network control (BPF/raw sockets, `pf`/`nft`/`netsh`, IP-forwarding) **requires
-administrator/root on every OS** — there is no sandbox-safe path. ArpCut handles this
+administrator/root on every OS** — there is no sandbox-safe path. cutter handles this
 without a terminal:
 
 - Launch it; if it isn't privileged, a banner offers **Set Up Access**.
-- **Grant Administrator Access** relaunches ArpCut elevated (native password prompt).
+- **Grant Administrator Access** relaunches cutter elevated (native password prompt).
 - **Install Background Helper** installs a small root daemon (`com.arpcut.helper`), the
   same model as Wireshark / Little Snitch — the unprivileged GUI then drives it over a
   local socket while holding no privilege itself.
@@ -80,12 +88,12 @@ without a terminal:
 
 ## Install
 
-**Download** a build from [Releases](https://github.com/Mvgnu/ArpCut/releases):
+**Download** a build from [Releases](https://github.com/momir64/cutter/releases):
 
 | Platform | Artifact | Notes |
 |----------|----------|-------|
-| macOS | `ArpCut-<ver>.dmg` | Drag to Applications. Unsigned builds: right-click → **Open** the first time. |
-| Windows | `ArpCut-<ver>-Setup.exe` | Inno Setup installer; bundles the **Npcap** driver. |
+| macOS | `cutter-<ver>.dmg` | Drag to Applications. Unsigned builds: right-click → **Open** the first time. |
+| Windows | `cutter-setup.exe` | Inno Setup installer; bundles the **Npcap** driver. |
 | Linux | AppImage / `.deb` | `setcap`/polkit for privileges. |
 
 On first launch, use **Set Up Access** (above).
@@ -93,7 +101,7 @@ On first launch, use **Set Up Access** (above).
 ### Run from source
 
 ```bash
-git clone https://github.com/Mvgnu/ArpCut.git && cd ArpCut
+git clone https://github.com/momir64/cutter.git && cd cutter
 python3 -m venv venv && source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt                       # PySide6, scapy, manuf
 python src/elmocut.py                                 # add sudo / run as admin for full power
@@ -107,12 +115,13 @@ Windows also needs [Npcap](https://npcap.com/) ("WinPcap API-compatible Mode").
 
 ```bash
 pip install pyinstaller
-python build.py            # → dist/ArpCut-<ver>.app  (or .exe / binary)
+python build.py            # Windows → dist/cutter/cutter.exe; macOS/Linux → dist/ArpCut-<ver>
 python build.py --dmg      # macOS → dist/ArpCut-<ver>.dmg  (drag-to-Applications)
 ```
 
-- **Windows:** drop `packaging/windows/vendor/npcap.exe`, then
-  `iscc /DMyAppVersion=<ver> packaging\windows\arpcut.iss`.
+- **Windows:** drop `packaging/windows/vendor/npcap.exe`, then run `build.py` — it also
+  builds the installer (`dist/cutter-setup.exe`) via `packaging/windows/cutter.iss` if
+  Inno Setup (`iscc`) is on `PATH`.
 - **Signing / notarization** (macOS Developer ID) is optional but removes the
   Gatekeeper prompt — see `packaging/README.md`. The app binary doubles as the root
   helper daemon (`--helper`), so no separate helper binary is shipped.
@@ -136,24 +145,17 @@ PySide6 GUI ──intent──▶ Controller ──▶ ops backend ──▶ eng
   engine, two transports.
 
 The `specs/` directory documents each domain (overview, platform, privilege, networking,
-firewall, gui, build). The engine has zero Qt imports and is covered by ~120 unit tests
+firewall, gui, build). The engine has zero Qt imports and is covered by 170+ unit tests
 (`tests/`), including a real client↔helper socket loopback.
-
----
-
-## VirusTotal
-
-Network tools trip antivirus false positives. The code is open source and auditable.
-[Windows](https://www.virustotal.com/gui/file/0d7db182f64251f0c22952192894b66b96cd2a87f9a143767bd07bbdcad4eb14) ·
-[macOS](https://www.virustotal.com/gui/file/948666b8fad8db4d3870123c794bad28453de5c3265d2cf0be94a1d79e086d46) ·
-[Linux](https://www.virustotal.com/gui/file/15e91b6b6099b6271f74577c1f44070d2983121199d280d28250bec130be84c5)
 
 ---
 
 ## Credits & License
 
+- **cutter** — my fork.
+- [ArpCut](https://github.com/Mvgnu/ArpCut) by Mvgnus (Magnus Ohle) — the repo I forked
+  from.
 - [elmoCut](https://github.com/elmoiv/elmocut) by elmoiv (Khaled El-Morshedy) — the
-  original this is forked from.
-- Mvgnus (Magnus Ohle).
+  original project, two forks back.
 
 GNU General Public License v3.0 — see [LICENSE](LICENSE).
