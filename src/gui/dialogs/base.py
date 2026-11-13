@@ -14,7 +14,7 @@ class Dialog(GlassDialog):
                  scroll: bool = False, max_height: int = 720) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.titlebar = TitleBar(self, title, minimize=False, zoom=False, height=42)
+        self.titlebar = TitleBar(self, title, minimize=False, zoom=False, height=36)
         self.body.addWidget(self.titlebar)
 
         wrap = QWidget()
@@ -30,14 +30,14 @@ class Dialog(GlassDialog):
             area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             area.setWidget(wrap)
             self.body.addWidget(area, 1)
-            self.setMaximumHeight(max_height + 2 * self._margin)
+            self.setMaximumHeight(max_height)
         else:
             self.body.addWidget(wrap)
 
         if width:
-            self.setMinimumWidth(width + 2 * self._margin)
+            self.setMinimumWidth(width)
         if height:
-            self.setMinimumHeight(height + 2 * self._margin)
+            self.setMinimumHeight(height)
 
     def section(self, text: str) -> QLabel:
         return label(text.upper(), 'section')

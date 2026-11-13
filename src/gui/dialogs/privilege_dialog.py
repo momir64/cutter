@@ -28,16 +28,15 @@ class PrivilegeDialog(Dialog):
         head = QHBoxLayout()
         head.setSpacing(12)
         self._hicon = QLabel()
-        head.addWidget(self._hicon, 0, Qt.AlignTop)
-        htext = QVBoxLayout()
-        htext.setSpacing(3)
-        htext.addWidget(label('Administrator access', 'hero'))
-        htext.addWidget(self.caption(
+        self._hicon.setFixedSize(36, 36)
+        self._hicon.setAlignment(Qt.AlignCenter)   # glyph centred in its box, level with the title
+        head.addWidget(self._hicon, 0, Qt.AlignVCenter)
+        head.addWidget(label('Administrator access', 'hero'), 1, Qt.AlignVCenter)
+        self.content.addLayout(head)
+        self.content.addWidget(self.caption(
             'cutter works at the raw-network level to discover and cut devices. '
             'Every operating system requires administrator access for that — the '
             'same as Wireshark or Little Snitch. Grant it once, below.'))
-        head.addLayout(htext, 1)
-        self.content.addLayout(head)
 
         # live status panel
         self._status_panel = QWidget()
@@ -45,9 +44,12 @@ class PrivilegeDialog(Dialog):
         srow = QHBoxLayout(self._status_panel)
         srow.setContentsMargins(14, 12, 14, 12)
         self._status_icon = QLabel()
+        self._status_icon.setFixedSize(20, 20)
+        self._status_icon.setAlignment(Qt.AlignCenter)
         self._status_text = label('', 'body')
-        srow.addWidget(self._status_icon)
-        srow.addWidget(self._status_text, 1)
+        self._status_text.setWordWrap(True)
+        srow.addWidget(self._status_icon, 0, Qt.AlignVCenter)
+        srow.addWidget(self._status_text, 1, Qt.AlignVCenter)
         self.content.addWidget(self._status_panel)
 
         # primary action
@@ -84,7 +86,7 @@ class PrivilegeDialog(Dialog):
         st = self.ctrl.privilege_status()
         plat, ok = st['platform'], st['ok']
         self._hicon.setPixmap(icons.pixmap('shield-check' if ok else 'lock',
-                                           THEME.good if ok else THEME.warn, 30))
+                                           THEME.good if ok else THEME.warn, 28))
         self._status_icon.setPixmap(icons.pixmap('check' if ok else 'alert',
                                                  THEME.good if ok else THEME.warn, 18))
         if st['root']:

@@ -43,7 +43,7 @@ class TrafficDialog(Dialog):
         row.addWidget(self._status, 1)
         row.addWidget(label('Route & Capture', 'body'))
         self._toggle = ToggleSwitch()
-        self._toggle.setToolTip('Route this device through your Mac and capture its traffic')
+        self._toggle.setToolTip('Route this device through your PC and capture its traffic')
         self._toggle.toggled.connect(self._on_toggle)
         row.addWidget(self._toggle)
         self.content.addLayout(row)
@@ -70,16 +70,16 @@ class TrafficDialog(Dialog):
     def start(self, device: dict) -> None:
         self._device = device
         self._mac = device['mac']
+        # The monitored device is always some other device on the LAN, never
+        # this PC — never mask its IP here.
         self._subtitle.setText(f'Live flows for {display_name(device)}  ·  {device["ip"]}')
-        self._toggle.blockSignals(True)
-        self._toggle.setChecked(True)
-        self._toggle.blockSignals(False)
+        self._toggle.set_checked_silent(True)
         self._begin()
 
     def _begin(self) -> None:
         capturing = self.ctrl.start_monitor(self._mac)
         if capturing:
-            self._set_status('● Capturing — routed through your Mac', 'good')
+            self._set_status('● Capturing — routed through your PC', 'good')
         else:
             self._set_status('● Needs administrator access to capture', 'warn')
         self._timer.start(2000)   # fallback; real updates come via flows_changed

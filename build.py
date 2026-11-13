@@ -46,7 +46,9 @@ HIDDEN_IMPORTS: list[str] = [
 COLLECT_ALL: list[str] = [
     'manuf',
     'scapy',
-    'PySide6',
+    # PySide6 intentionally omitted: PyInstaller's built-in PySide6 hook collects
+    # only the Qt plugins/DLLs the app actually uses; --collect-all PySide6 would
+    # add QtQuick, QtWebEngine, Qt Designer and other unused modules (~100 MB extra).
 ]
 
 
@@ -56,7 +58,7 @@ def build() -> None:
 
     # Base command — invoke PyInstaller via the current interpreter so it works
     # whether or not the console script is on PATH (venv / CI parity).
-    cmd: list[str] = [sys.executable, '-m', 'PyInstaller', '--name', f'ArpCut-{VERSION}']
+    cmd: list[str] = [sys.executable, '-m', 'PyInstaller', '--name', 'cutter', '--noconfirm']
 
     # Per-platform hidden imports / data collection (copied so we can extend
     # them for Windows without mutating the module-level lists).
@@ -102,8 +104,8 @@ def build() -> None:
         print()
         print("Build complete!")
         if system == 'Windows':
-            print(f"Output: dist/ArpCut-{VERSION}.exe")
-            print("Installer: iscc /DMyAppVersion=%s packaging\\windows\\arpcut.iss" % VERSION)
+            print(f"Output: dist/cutter/cutter.exe")
+            _build_installer()
         elif system == 'Darwin':
             print(f"Output: dist/ArpCut-{VERSION}.app")
             print("Installer: python build.py --dmg   (or packaging/macos/create_dmg.sh)")
@@ -111,6 +113,41 @@ def build() -> None:
             print(f"Output: dist/ArpCut-{VERSION}")
     else:
         print("Build failed!")
+        sys.exit(1)
+
+
+def _build_installer() -> None:
+    """Build the Inno Setup installer wizard (Windows only). Skipped silently if
+    iscc is not on PATH — the .iss file can always be run manually later."""
+    iss = Path(__file__).parent / 'packaging' / 'windows' / 'cutter.iss'
+
+    # Locate iscc — check PATH first, then the two default Inno Setup install dirs.
+    import shutil
+    iscc = shutil.which('iscc')
+    if not iscc:
+        for candidate in [
+            r'C:\Program Files (x86)\Inno Setup 6\iscc.exe',
+            r'C:\Program Files\Inno Setup 6\iscc.exe',
+            r'C:\Program Files (x86)\Inno Setup 7\iscc.exe',
+            r'C:\Program Files\Inno Setup 7\iscc.exe',
+        ]:
+            if Path(candidate).exists():
+                iscc = candidate
+                break
+
+    if not iscc:
+        print()
+        print("Inno Setup not found — skipping installer build.")
+        print(f"Install Inno Setup 6 or run manually:  iscc {iss}")
+        return
+
+    print()
+    print("Building installer wizard...")
+    result = subprocess.run([iscc, str(iss)])
+    if result.returncode == 0:
+        print("Installer: dist/cutter-setup.exe")
+    else:
+        print("Installer build failed — check Inno Setup output above.")
         sys.exit(1)
 
 

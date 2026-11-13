@@ -110,6 +110,17 @@ class ToggleSwitch(QAbstractButton):
         self._anim.setEndValue(self.width() - 25 if on else 3.0)
         self._anim.start()
 
+    def set_checked_silent(self, on: bool) -> None:
+        """Set the checked state without emitting ``toggled`` — used for initial
+        sync. Snaps the knob immediately instead of animating, since ``_animate``
+        only runs off the (here, suppressed) signal and would otherwise leave
+        the knob stuck on the wrong side of an already-recolored track."""
+        self.blockSignals(True)
+        self.setChecked(on)
+        self.blockSignals(False)
+        self._anim.stop()
+        self.set_knob(self.width() - 25 if on else 3.0)
+
     def get_knob(self) -> float:
         return self._pos
 

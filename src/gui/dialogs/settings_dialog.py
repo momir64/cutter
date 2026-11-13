@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (
 from gui.dialogs.base import Dialog
 from gui.theme import retheme
 from gui.widgets.controls import SegmentedControl, ToggleSwitch, hline, label
+from tools import stealth
 from tools.utils import get_ifaces
-from tools.utils_gui import get_settings, set_settings
+from tools.utils_gui import get_settings, is_admin, set_settings
 
 
 class SettingsDialog(Dialog):
@@ -41,6 +42,25 @@ class SettingsDialog(Dialog):
         theme.set_value('dark' if get_settings('dark') else 'light')
         theme.changed.connect(self._change_theme)
         self.content.addWidget(theme)
+
+        self.content.addWidget(hline())
+
+        # --- privacy --- one toggle: mask the device list AND (Windows, admin)
+        # stop this PC answering NetBIOS/LLMNR/mDNS name queries.
+        self.content.addWidget(self.section('Privacy'))
+        self.content.addWidget(self.caption(
+            'On Windows, randomises this PC\'s MAC address (rotating the DHCP IP) '
+            'and stops it answering NetBIOS, LLMNR and mDNS name queries — '
+            'so other devices cannot identify it. Fully reversible.'
+            if stealth.available() else
+            'Identity shield is Windows-only.'))
+        self._privacy = ToggleSwitch()
+        self._privacy.setChecked(bool(get_settings('privacy_mode')))
+        self._privacy.toggled.connect(self._change_privacy)
+        self.content.addLayout(self._row('Hide this device', self._privacy))
+        if stealth.available() and not is_admin():
+            self.content.addWidget(self.caption(
+                'Requires administrator access — relaunch elevated to use.'))
 
         self.content.addWidget(hline())
 
@@ -93,3 +113,14 @@ class SettingsDialog(Dialog):
         dark = value == 'dark'
         set_settings('dark', dark)
         retheme(QApplication.instance(), dark)
+
+    def _change_privacy(self, value: bool) -> None:
+        set_settings('privacy_mode', value)
+        if not stealth.available():
+            return
+        if not is_admin():
+            self.ctrl.status.emit(
+                'Stealth requires administrator access.', 'danger')
+            return
+        ok, msg = stealth.enable() if value else stealth.disable()
+        self.ctrl.status.emit(msg, 'good' if ok else 'danger')

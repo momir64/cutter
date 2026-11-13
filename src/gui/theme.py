@@ -133,9 +133,17 @@ def current() -> Theme:
 
 
 def font(size: int = 13, weight: int = QFont.Normal) -> QFont:
-    f = QFont('SF Pro Text')
-    if not f.exactMatch():
-        f = QFont('.AppleSystemUIFont')
+    import sys as _sys
+    if _sys.platform.startswith('win'):
+        name = 'Segoe UI'
+    elif _sys.platform == 'darwin':
+        name = 'SF Pro Text'
+        f = QFont(name)
+        if not f.exactMatch():
+            name = '.AppleSystemUIFont'
+    else:
+        name = 'Sans Serif'
+    f = QFont(name)
     f.setPointSize(size)
     f.setWeight(weight)  # type: ignore[arg-type]
     return f
@@ -148,7 +156,7 @@ def qss(t: Theme = None) -> str:
     return f"""
     * {{
         color: {t.text};
-        font-family: "SF Pro Text", ".AppleSystemUIFont", "Helvetica Neue";
+        font-family: "Segoe UI", ".AppleSystemUIFont", "SF Pro Text", "Helvetica Neue";
         font-size: 13px;
         outline: none;
     }}
@@ -273,6 +281,20 @@ def qss(t: Theme = None) -> str:
     QTableCornerButton::section {{ background: {t.surface}; border: none; }}
     QTableWidget::item, QTreeWidget::item {{ padding: 4px 6px; }}
     QLabel {{ background: transparent; }}
+
+    /* ---- right-click context menus ---- */
+    QMenu {{
+        background: {t.qcolor(t.window).name()}; border: 1px solid {t.border_strong};
+        border-radius: 10px; padding: 5px;
+    }}
+    QMenu::item {{
+        background: transparent; color: {t.text}; padding: 7px 14px 7px 7px;
+        border-radius: 5px; margin: 0 1px; min-width: 150px;
+    }}
+    QMenu::item:selected {{ background: {t.surface_hover}; }}
+    QMenu::item:disabled {{ color: {t.text_faint}; }}
+    QMenu::separator {{ height: 1px; background: {t.border}; margin: 6px 8px; }}
+    QMenu::icon {{ padding-left: 4px; }}
     """
 
 

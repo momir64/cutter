@@ -75,11 +75,21 @@ HKEY_AUTOSTART_PATH: str = 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'
 SETTINGS_KEYS: list[str] = [
     'dark', 'count', 'autostart', 'minimized', 'remember',
     'killed', 'autoupdate', 'threads', 'iface', 'nicknames',
+    'privacy_mode', 'hostname_shield_backup', 'mac_spoof_backup',
 ]
 
 SETTINGS_VALS: list[Any] = [
-    True, 255, False, True, False,
+    True, 255, False, False, False,
     [], True, 12, '', {},
+    False,  # off by default — one toggle: masks IP/MAC/name in the device list
+            # AND (Windows, admin) hides this PC from NetBIOS/LLMNR/mDNS
+    {},     # non-empty while the hostname-shield half of privacy_mode is applied
+            # (src/tools/stealth.py); holds the exact prior registry values so
+            # it can be fully reversed — this bookkeeping lives in this JSON
+            # file, not the registry, same as every other ArpCut setting
+    {},     # non-empty while MAC-address spoofing is active (src/tools/stealth.py);
+            # holds adapter name, registry key path, and original MAC value so the
+            # NIC can be fully restored — survives multiple app restarts
 ]
 
 # Typed dict mapping for dict-based settings access

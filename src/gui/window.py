@@ -1,14 +1,15 @@
 """MainWindow — presentation only. Renders controller state, emits user intent.
 
 Device-centric: a scrollable list of device cards, one primary Cut per card, and
-a selection-driven action bar for advanced actions. A glass privilege banner with
-a real "Set Up Access" button replaces silent failure. No packet/firewall logic
-here — all of that lives in the Controller.
+a right-click context menu for the rest (one-way, lag, blocker, traffic, info —
+applies to the whole multi-selection when more than one device is selected). A
+glass privilege banner with a real "Set Up Access" button replaces silent
+failure. No packet/firewall logic here — all of that lives in the Controller.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QSystemTrayIcon, QVBoxLayout, QWidget,
@@ -28,13 +29,19 @@ class MainWindow(GlassWindow):
     def __init__(self, controller: Controller) -> None:
         super().__init__()
         self.ctrl = controller
-        self.setWindowTitle('ArpCut')
+        self.setWindowTitle('cutter')
         self.setWindowIcon(icons.app_icon())
-        self.resize(780, 640)
-        self.setMinimumSize(560, 470)
+        self.resize(1120, 760)
+        # The narrowest width where the toolbar's buttons + filter box still keep
+        # their natural label sizes (measured) — below it Qt squeezes every button
+        # down to icon-only, illegible labels.
+        self.setMinimumSize(840, 470)
 
         self._rows: dict[str, DeviceRow] = {}
-        self._selected: str | None = None
+        self._selected: str | None = None  # anchor for shift-range + single-device dialogs
+        self._multi: set[str] = set()      # ctrl/shift accumulated selection, for bulk actions
+        self._sel_undo: list[tuple[frozenset, str | None]] = []
+        self._sel_redo: list[tuple[frozenset, str | None]] = []
         self._dialogs: dict[str, QWidget] = {}
         self._quitting = False
         self._is_admin = True
@@ -44,9 +51,11 @@ class MainWindow(GlassWindow):
         self._build_toolbar()
         self._build_banner()
         self._build_list()
-        self._build_actionbar()
         self._build_statusbar()
         self._build_tray()
+        self._build_selection_shortcuts()
+
+        QApplication.instance().installEventFilter(self)
 
         c = self.ctrl
         c.devices_changed.connect(self._on_devices)
@@ -63,19 +72,21 @@ class MainWindow(GlassWindow):
     def _content(self) -> QVBoxLayout:
         wrap = QWidget()
         lay = QVBoxLayout(wrap)
-        lay.setContentsMargins(16, 0, 16, 14)
+        lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(12)
         self.body.addWidget(wrap)
         return lay
 
     def _build_titlebar(self) -> None:
-        self.titlebar = TitleBar(self, title='ArpCut', logo=True)
-        self._theme_btn = IconButton('moon' if THEME.name == 'dark' else 'sun',
-                                     tooltip='Toggle light / dark', variant='toolbar')
-        self._theme_btn.clicked.connect(self._toggle_theme)
-        self.titlebar.add_right(self._theme_btn)
+        self.titlebar = TitleBar(self, title='cutter', logo=True)
         self.body.addWidget(self.titlebar)
         self._root_lay = self._content()
+
+    def changeEvent(self, event) -> None:
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.titlebar.sync_state()
+        super().changeEvent(event)
 
     def _build_toolbar(self) -> None:
         bar = QHBoxLayout()
@@ -95,6 +106,10 @@ class MainWindow(GlassWindow):
         self._search.textChanged.connect(self._apply_filter)
         bar.addWidget(self._search, 1)
 
+        bandwidth = IconButton('traffic', 'Bandwidth', 'Rank your devices by traffic used', variant='toolbar')
+        bandwidth.clicked.connect(lambda: self._open('bandwidth'))
+        bar.addWidget(bandwidth)
+
         restore = IconButton('restore', 'Restore All', 'Restore every device', variant='toolbar')
         restore.clicked.connect(self.ctrl.unkill_all)
         cut_all = IconButton('killall', 'Cut All', 'Cut every device', variant='solid')
@@ -102,12 +117,9 @@ class MainWindow(GlassWindow):
         cut_all.clicked.connect(self._confirm_cut_all)
         settings = IconButton('settings', tooltip='Settings', variant='toolbar')
         settings.clicked.connect(lambda: self._open('settings'))
-        about = IconButton('info', tooltip='About ArpCut', variant='toolbar')
-        about.clicked.connect(lambda: self._open('about'))
         bar.addWidget(restore)
         bar.addWidget(cut_all)
         bar.addWidget(settings)
-        bar.addWidget(about)
         self._root_lay.addLayout(bar)
 
         self._progress = QProgressBar()
@@ -126,10 +138,12 @@ class MainWindow(GlassWindow):
         lay.setSpacing(11)
         self._banner_icon = QLabel()
         self._banner_icon.setProperty('role', 'bannerIcon')
-        lay.addWidget(self._banner_icon, 0, Qt.AlignTop)
+        self._banner_icon.setFixedSize(20, 20)
+        self._banner_icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._banner_icon, 0, Qt.AlignVCenter)   # level with the message, not pinned to the top
         self._banner_text = label('', 'banner')
         self._banner_text.setWordWrap(True)
-        lay.addWidget(self._banner_text, 1)
+        lay.addWidget(self._banner_text, 1, Qt.AlignVCenter)
         self._banner_btn = QPushButton('Set Up Access')
         self._banner_btn.setProperty('accent', 'primary')
         self._banner_btn.setCursor(Qt.PointingHandCursor)
@@ -150,32 +164,6 @@ class MainWindow(GlassWindow):
         self._scroll.setWidget(holder)
         self._root_lay.addWidget(self._scroll, 1)
 
-    def _build_actionbar(self) -> None:
-        self._actionbar = QWidget()
-        self._actionbar.setProperty('glass', 'panel')
-        lay = QHBoxLayout(self._actionbar)
-        lay.setContentsMargins(12, 8, 12, 8)
-        lay.setSpacing(6)
-        self._action_title = label('', 'title')
-        lay.addWidget(self._action_title)
-        lay.addStretch(1)
-
-        def act(glyph, text, tip, slot):
-            b = IconButton(glyph, text, tip, size=16, variant='ghost')
-            b.clicked.connect(slot)
-            lay.addWidget(b)
-            return b
-
-        self._a_oneway = act('oneway', 'One-way', 'Block only the device\'s outbound traffic',
-                             lambda: self._on_selected(self.ctrl.toggle_one_way))
-        self._a_lag = act('lag', 'Lag', 'Intermittent lag switch', self._open_lag)
-        self._a_block = act('port', 'Blocker', 'Block specific ports / hosts (PSN, GTA…)',
-                            self._open_blocker)
-        self._a_traffic = act('traffic', 'Traffic', 'Live traffic monitor', self._open_traffic)
-        self._a_info = act('info', '', 'Device details', self._open_device)
-        self._actionbar.hide()
-        self._root_lay.addWidget(self._actionbar)
-
     def _build_statusbar(self) -> None:
         bar = QHBoxLayout()
         self._status = QLabel('Ready.')
@@ -187,9 +175,9 @@ class MainWindow(GlassWindow):
 
     def _build_tray(self) -> None:
         self._tray = QSystemTrayIcon(icons.app_icon(), self)
-        self._tray.setToolTip('ArpCut')
+        self._tray.setToolTip('cutter')
         menu = QMenu()
-        menu.addAction(QAction('Show ArpCut', self, triggered=self._restore_window))
+        menu.addAction(QAction('Show cutter', self, triggered=self._restore_window))
         menu.addSeparator()
         menu.addAction(QAction('Cut All', self, triggered=self.ctrl.kill_all))
         menu.addAction(QAction('Restore All', self, triggered=self.ctrl.unkill_all))
@@ -207,6 +195,9 @@ class MainWindow(GlassWindow):
         for mac in list(self._rows):
             if mac not in macs:
                 self._rows.pop(mac).deleteLater()
+        self._multi &= macs
+        if self._selected and self._selected not in macs:
+            self._selected = None
         for i in reversed(range(self._list.count() - 1)):
             item = self._list.takeAt(i)
             if item.widget():
@@ -218,13 +209,15 @@ class MainWindow(GlassWindow):
                     row.deleteLater()
                 row = DeviceRow(device)
                 row.clicked.connect(self._select)
-                row.activated.connect(lambda m: self._open_device())
+                row.activated.connect(self._activate_device)
                 row.cut_toggled.connect(self.ctrl.toggle_cut)
                 row.spoof_toggled.connect(self._on_spoof_toggled)
+                row.context_requested.connect(self._show_device_menu)
                 self._rows[device['mac']] = row
             else:
-                row.device = device
+                row.refresh_text(device)
             self._list.insertWidget(self._list.count() - 1, row)
+        self._refresh_selection_visuals()
         self._refresh_states()
         self._apply_filter(self._search.text())
         self._update_count()
@@ -252,7 +245,6 @@ class MainWindow(GlassWindow):
             device = self.ctrl.device_by_mac(mac)
             if device:
                 row.set_state(self.ctrl.state_of(device))
-        self._update_actionbar()
         self._update_count()
 
     def _on_status(self, message: str, level: str) -> None:
@@ -284,7 +276,7 @@ class MainWindow(GlassWindow):
             self._banner.hide()
         else:
             self._banner_text.setText(
-                'ArpCut needs administrator access to scan and cut devices. '
+                'cutter needs administrator access to scan and cut devices. '
                 'You can still ping-scan for now — set up access to unlock full power.')
             self._paint_banner()
             self._banner.show()
@@ -306,36 +298,153 @@ class MainWindow(GlassWindow):
 
     # -- selection & action bar ---------------------------------------------
 
-    def _select(self, mac: str) -> None:
-        self._selected = mac
+    def _build_selection_shortcuts(self) -> None:
+        QShortcut(QKeySequence('Ctrl+Z'), self, activated=self._undo_selection)
+        QShortcut(QKeySequence('Ctrl+Shift+Z'), self, activated=self._redo_selection)
+        QShortcut(QKeySequence('Ctrl+Y'), self, activated=self._redo_selection)
+
+    def eventFilter(self, obj, event) -> bool:
+        # Clicking anything in this window that isn't a device card (or inside
+        # one — its Spoof/Cut buttons count) clears the selection, like a file
+        # manager deselecting on an empty-area click. An unaccepted mouse press
+        # gets redelivered up the parent chain (row -> ... -> this window), and
+        # this filter sees every one of those hops — so resolve the actual
+        # clicked widget once via widgetAt(), rather than re-deriving it from
+        # whatever `obj` happens to be at each hop (the last hop is always this
+        # window itself, which isn't inside a DeviceRow, and was wrongly
+        # clearing a selection that an earlier, correct hop had just made).
+        if event.type() == QEvent.Type.MouseButtonPress and (self._multi or self._selected is not None):
+            target = QApplication.widgetAt(event.globalPosition().toPoint())
+            if target is not None and target.window() is self:
+                node, on_row = target, False
+                while node is not None:
+                    if isinstance(node, DeviceRow):
+                        on_row = True
+                        break
+                    node = node.parentWidget()
+                if not on_row:
+                    self._clear_selection()
+        return super().eventFilter(obj, event)
+
+    def _select(self, mac: str, modifiers=Qt.NoModifier) -> None:
+        """Plain click selects just this row; Ctrl+click toggles it in/out of
+        the selection; Shift+click selects the contiguous range from the last
+        clicked row to this one — standard list multi-select, no checkboxes."""
+        visible_order = [m for m, row in self._rows.items() if not row.isHidden()]
+        if modifiers & Qt.ShiftModifier and self._selected in visible_order and mac in visible_order:
+            i, j = visible_order.index(self._selected), visible_order.index(mac)
+            lo, hi = min(i, j), max(i, j)
+            multi = set(visible_order[lo:hi + 1])
+            selected = self._selected
+        elif modifiers & Qt.ControlModifier:
+            multi = set(self._multi)
+            multi.symmetric_difference_update({mac})
+            selected = mac
+        else:
+            multi, selected = {mac}, mac
+        self._set_selection(multi, selected)
+
+    def _activate_device(self, mac: str) -> None:
+        """Double-click: select just this device and open its detail dialog."""
+        self._set_selection({mac}, mac)
+        self._open_device()
+
+    def _clear_selection(self) -> None:
+        if self._multi or self._selected is not None:
+            self._set_selection(set(), None)
+
+    def _set_selection(self, multi: set, selected: str | None, record: bool = True) -> None:
+        """The single place selection actually changes — everything else (click,
+        shift/ctrl-click, right-click, background-click, double-click, undo/redo)
+        routes through here so undo/redo history stays complete and consistent."""
+        if multi == self._multi and selected == self._selected:
+            return
+        if record:
+            self._sel_undo.append((frozenset(self._multi), self._selected))
+            self._sel_redo.clear()
+        self._multi, self._selected = multi, selected
+        self._refresh_selection_visuals()
+
+    def _undo_selection(self) -> None:
+        if not self._sel_undo:
+            return
+        self._sel_redo.append((frozenset(self._multi), self._selected))
+        multi, selected = self._sel_undo.pop()
+        self._multi, self._selected = set(multi), selected
+        self._refresh_selection_visuals()
+
+    def _redo_selection(self) -> None:
+        if not self._sel_redo:
+            return
+        self._sel_undo.append((frozenset(self._multi), self._selected))
+        multi, selected = self._sel_redo.pop()
+        self._multi, self._selected = set(multi), selected
+        self._refresh_selection_visuals()
+
+    def _refresh_selection_visuals(self) -> None:
         for m, row in self._rows.items():
-            row.set_selected(m == mac)
-        self._update_actionbar()
+            row.set_selected(m in self._multi)
+        self._update_count()
 
     def _selected_device(self):
-        return self.ctrl.device_by_mac(self._selected) if self._selected else None
+        """The single device for single-target dialogs (Blocker/Traffic/Info) —
+        only defined when exactly one device is selected."""
+        mac = next(iter(self._multi)) if len(self._multi) == 1 else None
+        return self.ctrl.device_by_mac(mac) if mac else None
+
+    def _targets(self) -> list[str]:
+        """Devices a bulk action (Cut/One-way/Lag) applies to."""
+        return sorted(self._multi)
 
     def _on_selected(self, fn) -> None:
-        if self._selected:
-            fn(self._selected)
+        for mac in self._targets():
+            fn(mac)
 
-    def _update_actionbar(self) -> None:
-        device = self._selected_device()
-        if not device or device['admin']:
-            self._actionbar.hide()
-            return
-        state = self.ctrl.state_of(device)
-        self._action_title.setText(display_name(device))
-        self._a_oneway.set_active(state['one_way'], 'warn')
-        self._a_lag.set_active(state['lag'], 'warn')
-        self._actionbar.show()
+    def _build_device_menu(self):
+        """Build (but don't show) the right-click menu for the current
+        selection — the bulk/device actions that used to live in a bottom
+        action bar now live here, same as patchwork's context menus. Returns
+        None when nothing actionable is selected."""
+        devices = [d for m in self._targets()
+                  if (d := self.ctrl.device_by_mac(m)) and not d['admin']]
+        if not devices:
+            return None
+        multi = len(devices) > 1
+        states = [self.ctrl.state_of(d) for d in devices]
+        all_cut = all(s['cut'] for s in states)
+        all_oneway = all(s['one_way'] for s in states)
+        all_lag = all(s['lag'] for s in states)
+
+        menu = QMenu(self)
+        menu.addAction(icons.icon('restore' if all_cut else 'cut', THEME.text, 16),
+                       'Restore' if all_cut else 'Cut',
+                       lambda: self._on_selected(self.ctrl.toggle_cut))
+        menu.addAction(icons.icon('oneway', THEME.text, 16),
+                       'Stop one-way block' if all_oneway else 'One-way block',
+                       lambda: self._on_selected(self.ctrl.toggle_one_way))
+        menu.addAction(icons.icon('lag', THEME.text, 16),
+                       'Stop lag switch' if all_lag else 'Lag switch', self._open_lag)
+        if not multi:
+            menu.addSeparator()
+            menu.addAction(icons.icon('port', THEME.text, 16), 'Blocker', self._open_blocker)
+            menu.addAction(icons.icon('traffic', THEME.text, 16), 'Traffic monitor', self._open_traffic)
+            menu.addAction(icons.icon('info', THEME.text, 16), 'Device details', self._open_device)
+        return menu
+
+    def _show_device_menu(self, mac: str, global_pos) -> None:
+        if mac not in self._multi:
+            self._set_selection({mac}, mac)
+        menu = self._build_device_menu()
+        if menu is not None:
+            menu.exec(global_pos)
 
     def _update_count(self) -> None:
         n = max(0, len(self._rows) - 2)
         cut = len(self.ctrl.full_kills)
         iface = self.ctrl.iface_name()
         lock = '' if self._is_admin else '  ·  no admin'
-        self._count.setText(f'{n} devices · {cut} cut · {iface}{lock}')
+        selected = f'  ·  {len(self._multi)} selected' if len(self._multi) > 1 else ''
+        self._count.setText(f'{n} devices · {cut} cut · {iface}{lock}{selected}')
 
     def _apply_filter(self, text: str) -> None:
         text = text.strip().lower()
@@ -357,12 +466,12 @@ class MainWindow(GlassWindow):
         if name == 'settings':
             from gui.dialogs.settings_dialog import SettingsDialog
             return SettingsDialog(self.ctrl, self)
-        if name == 'about':
-            from gui.dialogs.about_dialog import AboutDialog
-            return AboutDialog(self)
         if name == 'privilege':
             from gui.dialogs.privilege_dialog import PrivilegeDialog
             return PrivilegeDialog(self.ctrl, self)
+        if name == 'bandwidth':
+            from gui.dialogs.bandwidth_dialog import BandwidthDialog
+            return BandwidthDialog(self.ctrl, self)
         raise KeyError(name)
 
     def _open_privilege(self) -> None:
@@ -397,17 +506,19 @@ class MainWindow(GlassWindow):
         DeviceDialog(self.ctrl, device, self).exec()
 
     def _open_lag(self) -> None:
-        device = self._selected_device()
-        if not device:
+        targets = [m for m in self._targets()
+                  if (d := self.ctrl.device_by_mac(m)) and not d['admin']]
+        if not targets:
             return
         from gui.dialogs.lag_dialog import LagDialog
-        if self.ctrl.lag_active_for(device['mac']):
-            self.ctrl.stop_lag()
+        if all(self.ctrl.lag_active_for(m) for m in targets):
+            for mac in targets:
+                self.ctrl.stop_lag_for(mac)
             return
-        dlg = LagDialog(self)
+        dlg = LagDialog(self, device_count=len(targets))
         if dlg.exec():
             block_ms, release_ms, direction = dlg.values()
-            self.ctrl.start_lag(device['mac'], block_ms, release_ms, direction)
+            self.ctrl.start_lag(targets, block_ms, release_ms, direction)
 
     def _confirm_cut_all(self) -> None:
         if QMessageBox.question(self, 'Cut All',
@@ -440,10 +551,11 @@ class MainWindow(GlassWindow):
         if minimized and not self._quitting:
             event.ignore()
             self.hide()
-            self._tray.showMessage('ArpCut', 'Still running in the menu bar.',
+            self._tray.showMessage('cutter', 'Still running in the menu bar.',
                                    QSystemTrayIcon.Information, 2000)
             return
         self.ctrl.shutdown()
         self._tray.hide()
+        QApplication.instance().removeEventFilter(self)
         event.accept()
         QApplication.instance().quit()

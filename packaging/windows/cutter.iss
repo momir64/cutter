@@ -14,7 +14,8 @@
 #define MyAppExe     "cutter.exe"
 #define MyAppPublisher "cutter"
 #define MyAppURL     "https://github.com/Mvgnu/ArpCut"
-#define MyAppSrc     SourcePath + "..\..\dist\cutter"
+#define MyAppSrc     SourcePath + "..\..\dist"
+#define MyAppVersion "2.0.1"
 
 ; Bundling Npcap is optional: if packaging\windows\vendor\npcap.exe is present
 ; it is embedded and silently installed when the driver is missing; otherwise
@@ -27,6 +28,7 @@
 [Setup]
 AppId={{7C3A2F10-CUTT-4C0T-9A11-CUTTER000001}
 AppName={#MyAppName}
+AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
@@ -48,13 +50,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-; Main executable
+; Single-file executable produced by PyInstaller --onefile.
 Source: "{#MyAppSrc}\cutter.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-; All bundled dependencies — Python runtime, PySide6, Scapy, pydivert, manuf, etc.
-; The _internal folder is what PyInstaller's --onedir puts alongside the exe.
-Source: "{#MyAppSrc}\_internal\*"; DestDir: "{app}\_internal"; \
-        Flags: ignoreversion recursesubdirs createallsubdirs
 
 #ifdef HaveNpcap
 ; Bundle the Npcap driver so users never have to hunt for it separately.

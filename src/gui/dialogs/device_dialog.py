@@ -24,6 +24,9 @@ class DeviceDialog(Dialog):
         header.addWidget(label(display_name(device), 'hero'), 1)
         self.content.addLayout(header)
 
+        # Only ever opened for other devices (double-click is disabled for
+        # 'Me'/Router rows — see DeviceRow.mouseDoubleClickEvent) — never
+        # mask here, the privacy toggle is scoped to this PC's own row.
         for field, value in (('IP address', device['ip']),
                              ('MAC address', device['mac'].lower()),
                              ('Vendor', device.get('vendor') or 'Unknown'),

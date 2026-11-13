@@ -14,14 +14,19 @@ from subprocess import CalledProcessError, check_output
 from threading import Thread
 from typing import Any, Callable, Generator, Optional
 
-from manuf import manuf
-from scapy.all import conf, get_if_list
-
 from constants import GLOBAL_MAC, DUMMY_IFACE
 from networking.ifaces import NetFace
 
 log = logging.getLogger(__name__)
-p: manuf.MacParser = manuf.MacParser()
+_p = None
+
+
+def _mac_parser():
+    global _p
+    if _p is None:
+        from manuf import manuf   # deferred — loads a large OUI database
+        _p = manuf.MacParser()
+    return _p
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +80,7 @@ def threaded(fn: Callable[..., Any]) -> Callable[..., Thread]:
 
 def get_vendor(mac: str) -> str:
     """Get vendor from manuf wireshark MAC database."""
-    return p.get_manuf(mac) or 'None'
+    return _mac_parser().get_manuf(mac) or 'None'
 
 
 def good_mac(mac: str) -> str:
@@ -92,6 +97,7 @@ def get_my_ip(iface_name: Optional[str]) -> str:
 
     ``iface_name`` must be the Scapy/pcap name.
     """
+    from scapy.all import conf
     try:
         conf.route.resync()
     except OSError as e:
@@ -123,6 +129,7 @@ def get_my_ip(iface_name: Optional[str]) -> str:
 
 def get_gateway_ip(iface_name: Optional[str]) -> str:
     """Get default gateway IP (cross-platform)."""
+    from scapy.all import conf
     try:
         conf.route.resync()
     except OSError as e:
@@ -289,7 +296,7 @@ def _get_ifaces_unix() -> Generator[NetFace, None, None]:
 
     Uses scapy's route table for IPs and ``get_if_hwaddr`` for MACs.
     """
-    from scapy.all import get_if_hwaddr
+    from scapy.all import conf, get_if_hwaddr, get_if_list
 
     # Build iface → src_ip map from route table
     iface_ips: dict[str, str] = {}
@@ -315,6 +322,7 @@ def _get_ifaces_unix() -> Generator[NetFace, None, None]:
 
 def get_ifaces() -> Generator[NetFace, None, None]:
     """Get current working interfaces (cross-platform dispatcher)."""
+    from scapy.all import conf
     conf.route.resync()
     if sys.platform.startswith('win'):
         yield from _get_ifaces_windows()
@@ -328,6 +336,7 @@ def get_ifaces() -> Generator[NetFace, None, None]:
 
 def get_default_iface() -> NetFace:
     """Get default pcap interface (cross-platform)."""
+    from scapy.all import conf
     ifaces_list = list(get_ifaces())
     if not ifaces_list:
         return NetFace(DUMMY_IFACE)

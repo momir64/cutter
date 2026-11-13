@@ -30,7 +30,11 @@ _BODIES: dict[str, str] = {
     'info':      '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
     'search':    '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     'copy':      '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    'close':     '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    # Bounding box matches 'square' exactly (4.5-19.5, a 15x15 box centered at
+    # 12,12) — the old 6-18 box was only 12x12, so next to the window buttons'
+    # square/minus it read as both smaller and, from the diagonal's own optical
+    # illusion, not quite vertically centered.
+    'close':     '<line x1="19.5" y1="4.5" x2="4.5" y2="19.5"/><line x1="4.5" y1="4.5" x2="19.5" y2="19.5"/>',
     'minus':     '<line x1="5" y1="12" x2="19" y2="12"/>',
     'plus':      '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
     'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
@@ -50,6 +54,11 @@ _BODIES: dict[str, str] = {
     'globe-lock': '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
     'external':  '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
     'github':    '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>',
+    # Maximize / restore for the window chrome buttons — same glyphs as patchwork's
+    # window-button icons: smaller, rounded-corner squares read as window outlines
+    # at 14px, where the old bigger sharp-cornered square just looked like a block.
+    'square':    '<rect x="4.5" y="4.5" width="15" height="15" rx="2"/>',
+    'restore-win': '<rect x="4" y="8" width="12" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/>',
 }
 
 _STROKE_W: dict[str, float] = {'more': 3.0}  # dots need a fatter stroke

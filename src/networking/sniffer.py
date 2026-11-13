@@ -9,12 +9,6 @@ from typing import Optional, Callable, Any
 
 log = logging.getLogger(__name__)
 
-try:
-    from scapy.all import sniff, IP, TCP, UDP, Raw
-except ImportError:
-    sniff = None  # type: ignore[assignment]
-    log.warning('scapy not available — traffic sniffing disabled')
-
 
 class TrafficSniffer:
     def __init__(self) -> None:
@@ -47,6 +41,10 @@ class TrafficSniffer:
 
     def get_last_packet_layers(self) -> dict[str, dict[str, Any]]:
         if self._last_pkt is None:
+            return {}
+        try:
+            from scapy.all import IP, TCP, UDP, Raw  # deferred — scapy is slow to import
+        except ImportError:
             return {}
         pkt = self._last_pkt
         info = {}
@@ -89,6 +87,13 @@ class TrafficSniffer:
 
     def start(self, victim_ip: str, iface: str, on_update: Optional[Callable[[], None]] = None) -> None:
         self.stop()
+        # Flow/pattern state is keyed by remote endpoint, not by victim — so
+        # switching to a new victim without clearing it would merge the new
+        # device's totals with whatever the previous victim left behind.
+        self._flows.clear()
+        self._patterns.clear()
+        self._pattern_samples.clear()
+        self._last_pkt = None
         self._victim_ip = victim_ip
         self._iface = iface
         self._callback = on_update
@@ -103,7 +108,10 @@ class TrafficSniffer:
         self._thread = None
 
     def _run(self) -> None:
-        if sniff is None:
+        try:
+            from scapy.all import sniff  # deferred — scapy is slow to import
+        except ImportError:
+            log.warning('scapy not available — traffic sniffing disabled')
             return
         # BPF filter: traffic to/from victim
         bpf = f"host {self._victim_ip}"
@@ -119,6 +127,7 @@ class TrafficSniffer:
             log.warning('Sniffer stopped on %s: %s', self._iface, e)
 
     def _process(self, pkt: object) -> None:
+        from scapy.all import IP, TCP, UDP  # deferred — cached after first call
         now = time()
         if IP not in pkt:
             return

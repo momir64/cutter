@@ -224,9 +224,7 @@ class BlockerDialog(Dialog):
             preset = self._presets[key]
             checked = (bool(target_mac and self.ctrl.is_dns_blocked(target_mac))
                        if preset.method == 'dns' else key in active_hosts)
-            toggle.blockSignals(True)
-            toggle.setChecked(checked)
-            toggle.blockSignals(False)
+            toggle.set_checked_silent(checked)
 
         # Active list is built from tracked state (in-memory, fast) — one row per
         # name / port / host, each individually removable.

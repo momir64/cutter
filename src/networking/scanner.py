@@ -1,7 +1,6 @@
 """ARP and ICMP network scanning with device discovery."""
 import logging
 from concurrent.futures.thread import ThreadPoolExecutor
-from scapy.all import Ether, arping, conf, get_if_addr
 from time import sleep
 from re import findall
 import sys
@@ -247,8 +246,9 @@ class Scanner():
     
     def arp_scan(self) -> None:
         """
-        Scan using Scapy arping method 
+        Scan using Scapy arping method
         """
+        from scapy.all import arping  # deferred — scapy is slow to import
         self.init()
 
         self.generate_ips()
@@ -330,6 +330,7 @@ class Scanner():
         try:
             # 1) Try scapy arping to /32 (requires admin on Windows)
             if self.iface.name != 'NULL':
+                from scapy.all import arping  # deferred — scapy is slow to import
                 ans = arping(f"{ip}/32", iface=self.iface.guid, timeout=1, verbose=0)  # Use guid (Scapy/pcap name)
                 hits = [(r[1].psrc, r[1].src) for r in ans[0]]
                 if hits:

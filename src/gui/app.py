@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from gui import icons, theme
@@ -28,7 +29,11 @@ def main() -> int:
     controller = Controller()
     window = MainWindow(controller)
     window.show()
-    controller.start()
+    # Paint the UI first, then bring the engine up in the background. Doing it
+    # inline (engine build + scapy import + clearing firewall rules, ~3 s) ran
+    # before the first paint and left an empty bordered shell on screen.
+    app.processEvents()
+    QTimer.singleShot(0, controller.start_async)
 
     return app.exec()
 

@@ -15,9 +15,10 @@ from gui.theme import THEME
 from gui.widgets.controls import Chip, IconButton, label
 
 
+
 def display_name(device: dict) -> str:
     if device['type'] == 'Me':
-        return 'This Mac'
+        return 'This PC'
     if device['type'] == 'Router':
         return 'Router / Gateway'
     name = device.get('name', '-')
@@ -55,10 +56,11 @@ class _Badge(QWidget):
 
 
 class DeviceRow(QFrame):
-    clicked = Signal(str)
+    clicked = Signal(str, object)   # mac, Qt.KeyboardModifiers (ctrl/shift multi-select)
     activated = Signal(str)
     cut_toggled = Signal(str)
     spoof_toggled = Signal(str)
+    context_requested = Signal(str, object)   # mac, global QPoint — right-click menu
 
     def __init__(self, device: dict, parent: QWidget = None) -> None:
         super().__init__(parent)
@@ -114,7 +116,17 @@ class DeviceRow(QFrame):
             lay.addWidget(self._cut)
 
     def _subtitle(self) -> str:
-        return f'{self.device["ip"]}  ·  {self.device["mac"].lower()}'
+        ip, mac = self.device['ip'], self.device['mac']
+        return f'{ip}  ·  {mac.lower()}'
+
+    def refresh_text(self, device: dict = None) -> None:
+        """Re-render name/IP/MAC — call after the device dict or the privacy
+        mask setting changes, since a reused row doesn't otherwise re-read
+        either."""
+        if device is not None:
+            self.device = device
+        self._name.setText(display_name(self.device))
+        self._sub.setText(self._subtitle())
 
     def _type_tone(self) -> str:
         return {'Me': 'accent', 'Router': 'purple'}.get(self.device['type'], 'good')
@@ -171,10 +183,13 @@ class DeviceRow(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.clicked.emit(self.mac)
+            self.clicked.emit(self.mac, event.modifiers())
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if not self.admin:
             self.activated.emit(self.mac)
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        self.context_requested.emit(self.mac, event.globalPos())

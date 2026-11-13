@@ -24,14 +24,17 @@ def _require_npcap() -> None:
 
 
 def _flush_firewall() -> int:
-    """Remove every ArpCut firewall rule. Called by the uninstaller (all OSes)."""
-    from tools import firewall
+    """Remove every ArpCut firewall rule and revert any still-active system
+    change (e.g. the hostname shield). Called by the uninstaller (all OSes) so
+    nothing ArpCut touched is left behind."""
+    from tools import firewall, stealth
     for ip, _ in firewall.list_blocked_ips():
         firewall.unblock_ip(ip)
     for port, proto, _ in firewall.list_blocked_ports():
         firewall.unblock_port(port, proto)
     firewall.clear_all_port_blocks()
     firewall.clear_anchor()
+    stealth.restore_if_active()
     return 0
 
 

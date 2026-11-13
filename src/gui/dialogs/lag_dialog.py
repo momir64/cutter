@@ -8,12 +8,16 @@ from gui.widgets.controls import SegmentedControl, label
 
 
 class LagDialog(Dialog):
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, device_count: int = 1) -> None:
         super().__init__('Lag Switch', parent, width=380)
 
         self.content.addWidget(self.caption(
             'Cycles the connection: blocks traffic for the lag interval, then '
             'restores it for the clear interval — repeatedly.'))
+        if device_count > 1:
+            self.content.addWidget(self.caption(
+                f'Applies to {device_count} selected devices. Each one gets the same '
+                'interval length, but staggered start times — they won\'t lag in lockstep.'))
 
         self._block = self._spin(1500)
         self._release = self._spin(1500)

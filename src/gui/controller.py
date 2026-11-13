@@ -92,6 +92,9 @@ class Controller(QObject):
     status = Signal(str, str)
     privilege_changed = Signal(bool, str)
     flows_changed = Signal(list)             # pushed live traffic (no polling)
+    bandwidth_progress = Signal(int, int, str)   # index, total, device label
+    bandwidth_result = Signal(str, int, int)     # mac, bytes, packets — one device's sample
+    bandwidth_finished = Signal()
 
     def __init__(self, ops=None) -> None:
         super().__init__()
@@ -99,15 +102,10 @@ class Controller(QObject):
         self.remember = bool(get_settings('remember'))
         self._applied_remember = False
 
-        # engine backend
+        # engine backend — _pick_backend() is deferred to start() so the
+        # window can appear before scapy/Engine load (~1 s on first run).
         self._remote = False
-        self.ops = ops if ops is not None else self._pick_backend()
-        # push hook: the engine calls this (from its sniffer / session thread)
-        # with fresh flows; the Qt signal marshals it onto the GUI thread.
-        try:
-            self.ops.on_flows = self._flows_pushed
-        except Exception:  # noqa: BLE001
-            pass
+        self.ops = ops  # None when ops is omitted; start() fills it in
 
         # UI-facing state (kept in sync as we drive the backend)
         self._devices: list[Device] = []
@@ -124,18 +122,17 @@ class Controller(QObject):
         self._dns_spoofed: set[str] = set()
         self._port_blocks: dict[str, set] = {}   # mac -> {(port, proto)} blocked for it
 
-        # lag switch
-        self._lag_mac: Optional[str] = None
-        self._lag_block_ms = 1500
-        self._lag_release_ms = 1500
-        self._lag_dir = 'both'
-        self._lag_timer = QTimer(self)
-        self._lag_timer.timeout.connect(self._lag_cycle)
+        # lag switch — mac -> {'timer', 'block_ms', 'release_ms', 'direction'}.
+        # Each targeted device gets its own repeating timer; when several are
+        # started together their cycles are phase-staggered (same interval
+        # length, offset start times) so they don't all lag in lockstep.
+        self._lag_targets: dict[str, dict] = {}
 
         self._pool = QThreadPool.globalInstance()
         self._tasks: set[_Task] = set()
         self._scan = ScanWorker()
         self._scan.done.connect(self._on_scan_done)
+        self._bw_running = False
 
     def _pick_backend(self):
         """Local engine when root; else the helper if it's running; else local
@@ -163,22 +160,53 @@ class Controller(QObject):
     def _flows_pushed(self, flows) -> None:
         self.flows_changed.emit(flows or [])
 
-    def start(self) -> None:
-        # Clear anything a previous hard-crash could have left blocked.
-        self._safe(self.ops.cleanup)
-        self.ops.set_scan_params(int(get_settings('count') or 255),
-                                 int(get_settings('threads') or 12))
-        saved = get_settings('iface')
+    def _bringup(self) -> dict:
+        """The slow part of startup — builds the engine (scapy import) and clears
+        leftover firewall rules (~2 s of netsh). Touches no Qt state, so it can run
+        off the UI thread; _finish_start() applies the result back on it."""
+        ops = self.ops if self.ops is not None else self._pick_backend()
+        info: dict = {'ops': ops, 'error': None}
+        self._safe(ops.cleanup)   # clear anything a previous hard-crash left blocked
+        ops.set_scan_params(int(get_settings('count') or 255),
+                            int(get_settings('threads') or 12))
         try:
+            saved = get_settings('iface')
             if saved:
-                self.ops.set_iface(saved)
-            st = self.ops.status()
-            self._iface = st.get('iface', 'NULL')
-            self._admin = bool(st.get('admin'))
-            self._devices = self.ops.devices() or []
-            self._apply_nicknames()
+                ops.set_iface(saved)
+            st = ops.status()
+            info['iface'] = st.get('iface', 'NULL')
+            info['admin'] = bool(st.get('admin'))
+            info['devices'] = ops.devices() or []
         except Exception as exc:  # noqa: BLE001
-            self.status.emit(f'Engine init failed: {exc}', 'danger')
+            info['error'] = exc
+        return info
+
+    def start(self) -> None:
+        """Synchronous start (tests, and anything that needs it done on return)."""
+        self._finish_start(self._bringup())
+
+    def start_async(self) -> None:
+        """Start without blocking the UI: the window stays responsive while the
+        engine comes up in the background."""
+        self._run(self._bringup, self._finish_start)
+
+    def _finish_start(self, info) -> None:
+        if isinstance(info, Exception):
+            self.status.emit(f'Engine init failed: {info}', 'danger')
+            return
+        if self.ops is None:
+            self.ops = info['ops']
+            try:
+                self.ops.on_flows = self._flows_pushed
+            except Exception:  # noqa: BLE001
+                pass
+        if info['error'] is not None:
+            self.status.emit(f'Engine init failed: {info["error"]}', 'danger')
+        else:
+            self._iface = info['iface']
+            self._admin = info['admin']
+            self._devices = info['devices']
+            self._apply_nicknames()
         self._privileged = self._admin or self._remote
         self._emit_privilege()
         self.devices_changed.emit(self._devices)
@@ -192,6 +220,9 @@ class Controller(QObject):
 
     def shutdown(self) -> None:
         self.stop_lag()
+        self.cancel_bandwidth_scan()
+        if self.ops is None:
+            return
         self._safe(self.ops.cleanup)          # restore everything now…
         if hasattr(self.ops, 'close'):
             self._safe(self.ops.close)        # …and drop the session (helper also
@@ -231,6 +262,9 @@ class Controller(QObject):
     # -- scanning ------------------------------------------------------------
 
     def scan(self, scan_type: int = 0) -> None:
+        if self.ops is None:
+            self.status.emit('Starting up — one moment…', 'accent')
+            return
         if self._scan.isRunning():
             return
         self.stop_lag()
@@ -285,6 +319,12 @@ class Controller(QObject):
     def device_by_mac(self, mac: str) -> Optional[Device]:
         return next((d for d in self._devices if d['mac'] == mac), None)
 
+    def refresh_display(self) -> None:
+        """Re-emit the current device list with no rescan — used to redraw the
+        list immediately after a display-only setting (e.g. the privacy mask)
+        changes, instead of waiting for the next scan tick."""
+        self.devices_changed.emit(self._devices)
+
     def state_of(self, device: Device) -> dict:
         mac = device['mac']
         return {
@@ -293,7 +333,7 @@ class Controller(QObject):
             'one_way': mac in self.one_way_kills,
             'monitor': mac in self._monitoring,
             'dns': mac in self._dns_blocks,
-            'lag': self._lag_timer.isActive() and self._lag_mac == mac,
+            'lag': mac in self._lag_targets,
         }
 
     # -- spoof (route a device through us — the base for blocks) --------------
@@ -330,7 +370,7 @@ class Controller(QObject):
         device = self.device_by_mac(mac)
         ip = device['ip'] if device else self._cut.get(mac)
         if self.lag_active_for(mac):
-            self.stop_lag()
+            self._stop_lag_for(mac)
         if mac in self._monitoring:
             self._safe(lambda: self.ops.stop_sniff())
             self._monitoring.discard(mac)
@@ -461,46 +501,79 @@ class Controller(QObject):
 
     # -- lag switch ----------------------------------------------------------
 
-    def start_lag(self, mac: str, block_ms: int, release_ms: int, direction: str) -> None:
-        device = self.device_by_mac(mac)
-        if not device or device['admin']:
+    def start_lag(self, macs, block_ms: int, release_ms: int, direction: str) -> None:
+        """Start the lag switch on one or more devices. Every device gets the
+        same block/release interval length, but with several devices each
+        one's start is phase-staggered across that interval so they don't all
+        lag in lockstep."""
+        if isinstance(macs, str):
+            macs = [macs]
+        targets = [m for m in dict.fromkeys(macs)
+                  if (d := self.device_by_mac(m)) and not d['admin']]
+        if not targets:
             return
         self.stop_lag()
-        self._lag_mac = mac
-        self._lag_block_ms, self._lag_release_ms, self._lag_dir = block_ms, release_ms, direction
-        self.status.emit(f'Lag switch on: {block_ms}ms lag / {release_ms}ms clear', 'warn')
-        self._lag_cycle()
-        self._lag_timer.start(block_ms + release_ms)
+        period = block_ms + release_ms
+        for i, mac in enumerate(targets):
+            timer = QTimer(self)
+            timer.timeout.connect(lambda m=mac: self._lag_cycle(m))
+            self._lag_targets[mac] = {'timer': timer, 'block_ms': block_ms, 'direction': direction}
+            phase = round(i * period / len(targets))
+            if phase <= 0:
+                self._lag_arm(mac, timer, period)   # first device engages immediately
+            else:
+                QTimer.singleShot(phase, lambda m=mac, t=timer, p=period: self._lag_arm(m, t, p))
+        extra = f' — staggered across {len(targets)} devices' if len(targets) > 1 else ''
+        self.status.emit(f'Lag switch on: {block_ms}ms lag / {release_ms}ms clear{extra}', 'warn')
         self.states_changed.emit()
 
+    def _lag_arm(self, mac: str, timer: QTimer, period: int) -> None:
+        """Run this device's first cycle after its stagger delay, then repeat."""
+        if mac not in self._lag_targets:
+            return  # stopped during its own stagger delay
+        self._lag_cycle(mac)
+        timer.start(period)
+
     @guarded
-    def _lag_cycle(self) -> None:
-        device = self.device_by_mac(self._lag_mac) if self._lag_mac else None
-        if not device:
-            self.stop_lag()
+    def _lag_cycle(self, mac: str) -> None:
+        info = self._lag_targets.get(mac)
+        device = self.device_by_mac(mac)
+        if not info or not device:
+            self._stop_lag_for(mac)
             return
-        mac = device['mac']
         self._ensure_spoofed(mac)            # route through us (no permanent drop)
         # Drop everything for one window, then release — a real kernel lag/loss.
         self.ops.lag(mac, True)
-        QTimer.singleShot(self._lag_block_ms,
+        QTimer.singleShot(info['block_ms'],
                           lambda m=mac: self._safe(lambda: self.ops.lag(m, False)))
+
+    def _stop_lag_for(self, mac: str) -> None:
+        info = self._lag_targets.pop(mac, None)
+        if not info:
+            return
+        info['timer'].stop()
+        self._safe(lambda: self.ops.lag(mac, False))
+        self._maybe_unspoof(mac)
 
     @guarded
     def stop_lag(self) -> None:
-        if not self._lag_timer.isActive() and self._lag_mac is None:
+        if not self._lag_targets:
             return
-        self._lag_timer.stop()
-        mac = self._lag_mac
-        if mac:
-            self._safe(lambda: self.ops.lag(mac, False))
-            self._maybe_unspoof(mac)
-        self._lag_mac = None
+        for mac in list(self._lag_targets):
+            self._stop_lag_for(mac)
         self.status.emit('Lag switch off.', 'good')
         self.states_changed.emit()
 
+    def stop_lag_for(self, mac: str) -> None:
+        """Stop the lag switch on just one device, leaving any others running."""
+        if mac not in self._lag_targets:
+            return
+        self._stop_lag_for(mac)
+        self.status.emit('Lag switch off for that device.', 'good')
+        self.states_changed.emit()
+
     def lag_active_for(self, mac: str) -> bool:
-        return self._lag_timer.isActive() and self._lag_mac == mac
+        return mac in self._lag_targets
 
     # -- host / port blocking (async — resolves DNS off-thread) --------------
 
@@ -687,6 +760,57 @@ class Controller(QObject):
 
     def can_capture(self) -> bool:
         return self._privileged
+
+    # -- bandwidth ranking -----------------------------------------------------
+    #
+    # "Which of my devices use the most/least bandwidth" — sample every
+    # non-admin device for a short fixed window, one at a time (never more than
+    # one device routed through us purely for this scan), and rank the totals.
+    # Reuses the same spoof + sniffer primitives as the single-device Traffic
+    # Monitor; nothing new talks to the network.
+
+    def start_bandwidth_scan(self, sample_seconds: int = 8) -> None:
+        if getattr(self, '_bw_running', False):
+            return
+        if not self._privileged:
+            self.status.emit('Set Up Access to measure bandwidth.', 'warn')
+            self.bandwidth_finished.emit()
+            return
+        self._bw_running = True
+        self._bw_queue = [d for d in self._devices if not d['admin']]
+        self._bw_sample_seconds = max(1, int(sample_seconds))
+        self._bw_index = 0
+        self._bw_cancelled = False
+        self._bw_added_spoof = False
+        self._bw_next()
+
+    def cancel_bandwidth_scan(self) -> None:
+        self._bw_cancelled = True
+
+    def _bw_next(self) -> None:
+        if self._bw_cancelled or self._bw_index >= len(self._bw_queue):
+            self._bw_running = False
+            self.bandwidth_finished.emit()
+            return
+        device = self._bw_queue[self._bw_index]
+        mac, ip = device['mac'], device['ip']
+        label = device.get('name') if device.get('name') not in (None, '-') else ip
+        self.bandwidth_progress.emit(self._bw_index + 1, len(self._bw_queue), label)
+        self._bw_added_spoof = mac not in self._spoofed
+        self._safe(lambda: self._ensure_spoofed(mac))
+        self._safe(lambda: self.ops.start_sniff(ip))
+        QTimer.singleShot(self._bw_sample_seconds * 1000, lambda: self._bw_collect(mac))
+
+    def _bw_collect(self, mac: str) -> None:
+        self._safe(lambda: self.ops.stop_sniff())
+        flows = self.flows()
+        total_bytes = sum(int(f.get('bytes', 0)) for f in flows)
+        total_packets = sum(int(f.get('packets', 0)) for f in flows)
+        self.bandwidth_result.emit(mac, total_bytes, total_packets)
+        if self._bw_added_spoof:
+            self._maybe_unspoof(mac)
+        self._bw_index += 1
+        self._bw_next()
 
     # -- DNS-name blocking (PSN) — MITM the device, NXDOMAIN the name --------
 
